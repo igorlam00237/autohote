@@ -29,6 +29,8 @@ import psycopg2
 import psycopg2.extras
 from flask import Flask, abort, jsonify, redirect, render_template, request, url_for, Response
 
+import jobs  # noqa: E402 — import après Flask pour respecter la convention du fichier
+
 app = Flask(__name__)
 
 DB_CONFIG = {
@@ -890,6 +892,21 @@ def health():
         return {"status": "ok"}, 200
     except Exception as e:
         return {"status": "error", "detail": str(e)}, 500
+
+
+@app.route("/api/jobs/status")
+@require_auth
+def api_jobs_status():
+    """Endpoint admin : état de la file d'attente du scraper.
+
+    Protégé par Basic Auth (même credentials que le dashboard). Renvoie les
+    compteurs par statut, le breakdown par job_type, et les derniers échecs.
+    """
+    try:
+        return jsonify(jobs.get_status_summary()), 200
+    except Exception as e:
+        app.logger.exception("Échec récupération status jobs")
+        return jsonify({"error": str(e)}), 500
 
 
 @app.template_filter("humantime")

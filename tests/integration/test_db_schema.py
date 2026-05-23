@@ -1,6 +1,6 @@
 """Tests d'intégration du schéma BDD.
 
-Garantit que les 4 tables existent avec les colonnes attendues, et que les
+Garantit que les tables existent avec les colonnes attendues, et que les
 contraintes (FK, defaults) sont en place. Premier rempart contre une
 migration cassée.
 """
@@ -9,7 +9,13 @@ import pytest
 
 @pytest.mark.integration
 class TestSchemaTables:
-    REQUIRED_TABLES = {"sources", "logements", "conversations", "messages"}
+    REQUIRED_TABLES = {
+        "sources",
+        "logements",
+        "conversations",
+        "messages",
+        "scraper_jobs",
+    }
 
     def test_all_required_tables_exist(self, db_conn):
         with db_conn.cursor() as cur:
@@ -34,12 +40,19 @@ class TestSchemaColumns:
         },
         "conversations": {
             "id", "logement_id", "voyageur_nom", "voyageur_langue",
-            "thread_id_externe", "statut", "created_at", "updated_at",
+            "thread_id_externe", "airbnb_listing_id",
+            "statut", "created_at", "updated_at",
         },
         "messages": {
             "id", "conversation_id", "role", "contenu_original",
             "contenu_propose", "contenu_envoye", "valide_par",
-            "valide_at", "statut", "created_at",
+            "valide_at", "statut", "external_message_id", "created_at",
+        },
+        "scraper_jobs": {
+            "id", "job_type", "payload", "status",
+            "attempts", "max_attempts", "scheduled_at",
+            "started_at", "completed_at", "last_error",
+            "conversation_id", "created_at",
         },
     }
 

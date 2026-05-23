@@ -87,6 +87,35 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_external_message_id
     WHERE external_message_id IS NOT NULL;
 
 -- -----------------------------------------------------
+-- Table scraper_jobs
+-- File d'attente de jobs asynchrones consommés par le worker scraper.
+-- Types : process_inbound, send_reply, login, daily_reconciliation.
+-- Statuts : pending, running, completed, failed, cancelled.
+-- -----------------------------------------------------
+CREATE TABLE IF NOT EXISTS scraper_jobs (
+    id              BIGSERIAL PRIMARY KEY,
+    job_type        TEXT NOT NULL,
+    payload         JSONB NOT NULL DEFAULT '{}'::jsonb,
+    status          TEXT NOT NULL DEFAULT 'pending',
+    attempts        INTEGER NOT NULL DEFAULT 0,
+    max_attempts    INTEGER NOT NULL DEFAULT 3,
+    scheduled_at    TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    started_at      TIMESTAMPTZ,
+    completed_at    TIMESTAMPTZ,
+    last_error      TEXT,
+    conversation_id INTEGER REFERENCES conversations(id),
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_scraper_jobs_pending
+    ON scraper_jobs (scheduled_at, id)
+    WHERE status = 'pending';
+
+CREATE INDEX IF NOT EXISTS idx_scraper_jobs_conversation
+    ON scraper_jobs (conversation_id, job_type, created_at DESC)
+    WHERE conversation_id IS NOT NULL;
+
+-- -----------------------------------------------------
 -- Index pour les requêtes fréquentes
 -- -----------------------------------------------------
 CREATE INDEX IF NOT EXISTS idx_logements_source       ON logements(source_id);
