@@ -1,0 +1,91 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: autohote-postgres
+    restart: always
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  n8n:
+    image: docker.n8n.io/n8nio/n8n:latest
+    container_name: n8n
+    restart: always
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "5678:5678"
+    environment:
+      - N8N_BASIC_AUTH_ACTIVE=true
+      - N8N_BASIC_AUTH_USER=${N8N_BASIC_AUTH_USER}
+      - N8N_BASIC_AUTH_PASSWORD=${N8N_BASIC_AUTH_PASSWORD}
+      - N8N_HOST=${N8N_HOST}
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=http
+      - N8N_SECURE_COOKIE=false
+      - WEBHOOK_URL=http://${N8N_HOST}:5678/
+      - GENERIC_TIMEZONE=Europe/Paris
+      - TZ=Europe/Paris
+      - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}
+    volumes:
+      - n8n_data:/home/node/.n8n
+
+  dashboard:
+    build: ./dashboard
+    container_name: autohote-dashboard
+    restart: always
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    environment:
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
+      - DASHBOARD_USER=${DASHBOARD_USER}
+      - DASHBOARD_PASSWORD=${DASHBOARD_PASSWORD}
+      - WEBHOOK_SECRET=${WEBHOOK_SECRET}
+      - CLAUDE_API_KEY=${CLAUDE_API_KEY}
+      - MAILGUN_SIGNING_KEY=${MAILGUN_SIGNING_KEY}
+      - TZ=Europe/Paris
+
+  tests:
+    build: ./tests
+    container_name: autohote-tests
+    profiles: ["tests"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=autohote_test
+      - DASHBOARD_USER=admin
+      - DASHBOARD_PASSWORD=test-password
+      - WEBHOOK_SECRET=test-webhook-secret
+      - CLAUDE_API_KEY=sk-ant-fake
+      - MAILGUN_SIGNING_KEY=test-mailgun-signing-key
+      - TZ=Europe/Paris
+    volumes:
+      - ./tests:/app/tests:ro
+      - ./dashboard:/app/dashboard:ro
+      - ./scripts:/app/scripts:ro
+      - ./docker-compose.yml:/app/docker-compose.yml:ro
+
+volumes:
+  n8n_data:
+  postgres_data:

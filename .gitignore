@@ -1,0 +1,38 @@
+# --- Fichiers privés de développement ---
+# Ces fichiers contiennent du contexte interne / notes de travail.
+# Ils restent en local et ne sont pas partagés.
+CLAUDE.md
+ENGINEERING.md
+.claude/
+.cursor/
+.aider*
+.copilot/
+
+# Secrets — JAMAIS commiter
+.env
+*.key
+*.pem
+
+# Données locales (sauvegardes SQLite, dumps)
+*.db
+*.sqlite
+*.sqlite3
+backups/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Éditeurs
+.vscode/
+.idea/
+*.swp
+*.bak
+
+# Dépendances
+node_modules/
+__pycache__/
