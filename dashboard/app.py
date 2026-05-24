@@ -25,6 +25,8 @@ import urllib.request
 from datetime import datetime, timezone
 from functools import wraps
 
+import logging
+
 import psycopg2
 import psycopg2.extras
 from flask import Flask, abort, jsonify, redirect, render_template, request, url_for, Response
@@ -32,6 +34,12 @@ from flask import Flask, abort, jsonify, redirect, render_template, request, url
 import jobs  # noqa: E402 — import après Flask pour respecter la convention du fichier
 
 app = Flask(__name__)
+
+# Pousse les logs applicatifs au niveau INFO pour qu'ils apparaissent dans
+# `docker compose logs dashboard`. Sinon le défaut Flask est WARNING et on
+# rate les détails de filtrage du webhook (ex: pourquoi un email a été ignoré).
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+app.logger.setLevel(logging.INFO)
 
 DB_CONFIG = {
     "host": os.environ.get("POSTGRES_HOST", "postgres"),
@@ -599,20 +607,51 @@ def _parse_mailgun_headers(form: dict) -> dict:
 
 
 def _is_airbnb_message_email(headers: dict) -> bool:
-    """Vrai si l'email Airbnb est un VRAI message voyageur (pas rappel,
-    pas notification de paiement, pas check-in reminder).
+    """Vrai si l'email Airbnb contient un message voyageur exploitable.
 
-    On se base sur les headers propriétaires Airbnb :
-    - X-Category: 'message' pour les nouveaux messages dans une conversation
-    - X-Template: doit commencer par 'MESSAGING_' (vs RESERVATION_, REMINDER_, etc.)
+    Stratégie élargie (Airbnb a beaucoup de templates qui contiennent un
+    vrai message voyageur, pas juste MESSAGING_*) :
+    - Path heureux : X-Category=message + X-Template=MESSAGING_* (messages
+      dans une conversation sur réservation confirmée)
+    - Path 2 : X-Category in {message, alert} avec X-Template qui dénote
+      un échange avec le voyageur : INQUIRY_*, RESERVATION_REQUEST_*,
+      BOOKING_REQUEST_*, AVAILABILITY_INQUIRY_*, etc.
+    - Blacklist explicite : PAYMENT_*, REVIEW_*, REMINDER_*, CHECK_IN_*,
+      CHECK_OUT_*, MARKETING_*, NEWSLETTER_*
+
+    En cas de doute, on accepte et on laisse les extracteurs body filtrer
+    (si pas de thread_id ou pas de message extractible, on rejette plus tard).
     """
     category = (headers.get("X-Category") or "").strip().lower()
-    if category != "message":
-        return False
     template = (headers.get("X-Template") or "").strip().upper()
-    if not template.startswith("MESSAGING_"):
+
+    # Blacklist explicite : ne traite jamais ces types
+    BLACKLIST_PREFIXES = (
+        "PAYMENT_", "REVIEW_", "REMINDER_", "CHECK_IN_", "CHECK_OUT_",
+        "MARKETING_", "NEWSLETTER_", "CALENDAR_", "PRICE_TIP_",
+        "EARNINGS_", "PAYOUT_", "REFERRAL_",
+    )
+    if any(template.startswith(p) for p in BLACKLIST_PREFIXES):
         return False
-    return True
+
+    # Whitelist explicite : sûr de traiter
+    WHITELIST_PREFIXES = (
+        "MESSAGING_", "INQUIRY_", "RESERVATION_REQUEST_", "BOOKING_REQUEST_",
+        "BOOKING_INITIAL_",  # voyageur fait une 1ère demande d'info sur une annonce
+        "AVAILABILITY_INQUIRY_", "PRE_BOOKING_", "PRE_APPROVAL_REQUEST_",
+        "NEW_MESSAGE_", "CONVERSATION_",
+    )
+    if any(template.startswith(p) for p in WHITELIST_PREFIXES):
+        return True
+
+    # Catégorie permissive : message ou alert, sans template clair
+    # → on accepte et on laisse l'extracteur body trier (s'il extrait
+    # un thread_id et un message, c'est qu'on a affaire à un vrai
+    # échange voyageur).
+    if category in ("message", "alert", "reservation"):
+        return True
+
+    return False
 
 
 def _is_airbnb_login_email(headers: dict, subject: str = "") -> bool:

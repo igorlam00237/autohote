@@ -384,6 +384,32 @@ class TestAirbnbCategoryFilter:
         body = resp.get_json()
         assert body["status"] == "ignored"
 
+    def test_booking_initial_inquiry_passes_filter(self, client, seed_logement):
+        """Régression observée le 24 mai 2026 : Airbnb envoie un email de
+        type 'BOOKING_INITIAL_INQUIRY' avec X-Category=support pour une
+        première demande d'info voyageur sur une annonce. Notre filtre
+        original (qui n'acceptait que MESSAGING_*) rejetait à tort cet
+        email pourtant légitime. Le whitelist élargi doit le traiter."""
+        resp = _mailgun_post(client, fields={
+            "sender": "automated@airbnb.com",
+            "From": "Airbnb <automated@airbnb.com>",
+            "subject": "Chambre moderne 14 places : demande d'information",
+            "stripped-text": (
+                "MARIE\nResponsable de la réservation\n\n"
+                "Bonjour, votre logement est-il dispo ?\n"
+                "https://www.airbnb.fr/hosting/thread/9988776655"
+            ),
+            "Message-Id": "<inquiry-001@airbnb.com>",
+            "_message_headers_json": _airbnb_headers_json(
+                category="support",
+                template="BOOKING_INITIAL_INQUIRY",
+            ),
+        })
+        assert resp.status_code == 200
+        body = resp.get_json()
+        assert body["status"] in ("ok", "partial")
+        assert body["parsed"]["thread_id_externe"] == "9988776655"
+
 
 @pytest.mark.integration
 class TestAirbnbBodyExtraction:
