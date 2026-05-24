@@ -456,6 +456,62 @@ class TestAirbnbBodyExtraction:
 
 
 @pytest.mark.integration
+class TestBookingInitialInquiryExtraction:
+    """Extraction depuis un email Airbnb de type BOOKING_INITIAL_INQUIRY :
+    structure complètement différente du format "Demande d'information"
+    classique. Le voyageur s'identifie via 'Répondez à la demande envoyée
+    par <NOM>' et le message est entre 'Bonjour <hôte>,' et le bouton CTA
+    'Pré-approuver / Refuser'."""
+
+    def _post_with_fixture(self, client):
+        body = (FIXTURES_DIR / "booking_initial_inquiry_body.txt").read_text(encoding="utf-8")
+        return _mailgun_post(client, fields={
+            "sender": "automated@airbnb.com",
+            "From": "Airbnb <automated@airbnb.com>",
+            "subject": "Chambre privée dans logement partagé : demande d'information",
+            "stripped-text": body,
+            "Message-Id": "<inquiry-fixture-001@airbnb.com>",
+            "_message_headers_json": _airbnb_headers_json(
+                category="support",
+                template="BOOKING_INITIAL_INQUIRY",
+            ),
+        })
+
+    def test_voyageur_extracted_from_inquiry_phrase(self, client, seed_logement):
+        resp = self._post_with_fixture(client)
+        assert resp.status_code == 200
+        body = resp.get_json()
+        # Le nom est dans "Répondez à la demande envoyée par Marie Dupont"
+        assert body["parsed"]["voyageur_nom"] == "Marie Dupont"
+
+    def test_thread_id_extracted_from_inquiry(self, client, seed_logement):
+        resp = self._post_with_fixture(client)
+        assert resp.get_json()["parsed"]["thread_id_externe"] == "9988776655"
+
+    def test_listing_id_extracted_from_inquiry(self, client, seed_logement):
+        resp = self._post_with_fixture(client)
+        assert resp.get_json()["parsed"]["airbnb_listing_id"] == "1111122222333344455"
+
+    def test_message_extracted_between_greeting_and_cta(self, client, db_conn, seed_logement):
+        resp = self._post_with_fixture(client)
+        conv_id = resp.get_json()["conversation_id"]
+        # Le message stocké doit être le vrai texte voyageur, pas le boilerplate
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "SELECT contenu_original FROM messages "
+                "WHERE conversation_id = %s AND role = 'user' "
+                "ORDER BY id DESC LIMIT 1;",
+                (conv_id,),
+            )
+            msg = cur.fetchone()[0]
+        assert "Très intéressée par votre logement" in msg
+        assert "me confirmer ma réservation" in msg
+        # Ne contient PAS de boilerplate
+        assert "Airbnb" not in msg or "votre logement" in msg
+        assert "Pré-approuver" not in msg
+
+
+@pytest.mark.integration
 class TestMailgunHappyPath:
     def test_creates_full_pipeline(self, client, db_conn, seed_logement):
         resp = _mailgun_post(client, fields={

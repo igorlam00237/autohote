@@ -692,6 +692,7 @@ def _extract_login_code(body: str) -> str | None:
 # Regex pré-compilées pour l'extraction depuis le body de l'email Airbnb
 _AIRBNB_THREAD_ID_RE = re.compile(r"airbnb\.[a-z.]+/hosting/thread/(\d+)")
 _AIRBNB_LISTING_ID_RE = re.compile(r"airbnb\.[a-z.]+/rooms/(\d+)")
+# Format 1 (messages dans une conversation existante) :
 # Bloc voyageur dans le body texte : nom en UPPERCASE seul sur sa ligne,
 # suivi de "Responsable de la réservation" sur la ligne suivante (ou après
 # UNE seule ligne blanche, pas plus). Le `\s*` initial est volontaire pour
@@ -701,6 +702,15 @@ _AIRBNB_LISTING_ID_RE = re.compile(r"airbnb\.[a-z.]+/rooms/(\d+)")
 _AIRBNB_VOYAGEUR_RE = re.compile(
     r"^\s*([A-ZÀ-ÿ][A-ZÀ-ÿ '\-]+?)[ \t]*\n[ \t]*\n?[ \t]*Responsable de la r[ée]servation",
     re.MULTILINE,
+)
+
+# Format 2 (BOOKING_INITIAL_INQUIRY — demande d'info initiale d'un voyageur) :
+# Le nom apparaît dans une phrase introductive :
+#   "Répondez à la demande envoyée par <NomVoyageur>"
+# Capture aussi prénom + nom si présents.
+_AIRBNB_VOYAGEUR_INQUIRY_RE = re.compile(
+    r"(?:R[ée]pondez à la demande envoy[ée]e par|Nouvelle demande de)\s+"
+    r"([A-ZÀ-ÿ][a-zA-Zà-ÿ\-]+(?:\s+[A-ZÀ-ÿ][a-zA-Zà-ÿ\-]+)?)\s*[\n<]",
 )
 
 # Termes qui peuvent matcher le regex (UPPERCASE) mais ne sont pas des noms
@@ -715,10 +725,19 @@ _VOYAGEUR_FALSE_POSITIVES = {
     "MESSAGE", "MESSAGES",
     "AIRBNB",
 }
-# Message texte : tout ce qui suit "Responsable de la réservation" jusqu'à
-# "Consulter", "Répondre", ou un lien Airbnb
+# Format 1 message texte : tout ce qui suit "Responsable de la réservation"
+# jusqu'à "Consulter", "Répondre", ou un lien Airbnb
 _AIRBNB_MESSAGE_RE = re.compile(
     r"Responsable de la r[ée]servation\s*\n(.+?)(?=\n\s*(?:Consulter|R[ée]pondre|Vous pouvez|https?://www\.airbnb))",
+    re.DOTALL,
+)
+
+# Format 2 message texte (BOOKING_INITIAL_INQUIRY) : entre la salutation
+# "Bonjour <hôte>," et le marqueur de fin "Pré-approuver / Refuser" (ou
+# variantes). Le voyageur s'adresse à l'hôte par son prénom.
+_AIRBNB_MESSAGE_INQUIRY_RE = re.compile(
+    r"Bonjour[^,\n]*,\s*\n+(.+?)"
+    r"(?=\n+\s*(?:Pr[ée][\-\s]?approuver|Refuser|Voyageurs?|Arriv[ée]e|D[ée]part|Vous disposez|Questions fr[ée]quentes))",
     re.DOTALL,
 )
 
@@ -743,37 +762,66 @@ def _extract_airbnb_listing_id(body: str) -> str | None:
 
 
 def _extract_voyageur_from_body(body: str) -> str | None:
-    """Extrait le nom du voyageur depuis le bloc UPPERCASE 'ADRIEN\\nResponsable de la réservation'.
-    Plus fiable que le From header (souvent générique 'Airbnb <express@...>').
+    """Extrait le nom du voyageur depuis le body email Airbnb.
 
-    Filtre les faux positifs : si le mot capturé est une rubrique connue
-    (OBJET, BIENVENUE, etc.), on retourne None pour laisser le fallback
-    From/Subject prendre la main.
+    Essaie 2 formats en cascade :
+    1. Format messages : bloc UPPERCASE 'ADRIEN\\nResponsable de la réservation'
+    2. Format demande d'info initiale : 'Répondez à la demande envoyée par <NOM>'
+
+    Filtre les faux positifs (OBJET, BIENVENUE, etc.). Retourne None si
+    aucune extraction propre n'est possible — le caller fallback alors
+    sur _extract_voyageur_name(from_header, subject).
     """
     if not body:
         return None
+
+    # Format 1 : bloc UPPERCASE + "Responsable de la réservation"
     m = _AIRBNB_VOYAGEUR_RE.search(body)
-    if not m:
-        return None
-    raw = m.group(1).strip()
-    if raw.upper() in _VOYAGEUR_FALSE_POSITIVES:
-        return None
-    # Le nom est en MAJUSCULES dans l'email. On re-capitalise proprement.
-    return " ".join(word.capitalize() for word in raw.split())
+    if m:
+        raw = m.group(1).strip()
+        if raw.upper() not in _VOYAGEUR_FALSE_POSITIVES:
+            return " ".join(word.capitalize() for word in raw.split())
+
+    # Format 2 : "Répondez à la demande envoyée par <NOM>"
+    m2 = _AIRBNB_VOYAGEUR_INQUIRY_RE.search(body)
+    if m2:
+        name = m2.group(1).strip()
+        # Filtre le nom de l'hôte (premier "Armel" dans le body est ambigu mais
+        # le pattern "Répondez à la demande envoyée par" pointe sur le VOYAGEUR)
+        if name.upper() not in _VOYAGEUR_FALSE_POSITIVES:
+            return name
+
+    return None
 
 
 def _extract_message_from_body(body: str) -> str | None:
-    """Extrait le texte du message voyageur depuis le body Airbnb."""
+    """Extrait le texte du message voyageur depuis le body Airbnb.
+
+    Essaie 2 formats en cascade :
+    1. Format messages : après "Responsable de la réservation"
+    2. Format demande initiale : après "Bonjour <hôte>," jusqu'au CTA
+       "Pré-approuver / Refuser" ou autres marqueurs.
+    """
     if not body:
         return None
+
+    # Format 1 : "Responsable de la réservation" suivi du message
     m = _AIRBNB_MESSAGE_RE.search(body)
-    if not m:
-        return None
-    text = m.group(1).strip()
-    # Normalise les espaces et les retours à la ligne
-    text = re.sub(r"[ \t]+", " ", text)
-    text = re.sub(r"\n{3,}", "\n\n", text)
-    return text.strip()
+    if m:
+        text = m.group(1).strip()
+        text = re.sub(r"[ \t]+", " ", text)
+        text = re.sub(r"\n{3,}", "\n\n", text)
+        return text.strip()
+
+    # Format 2 : "Bonjour <hôte>," suivi du message, terminé par "Pré-approuver"
+    m2 = _AIRBNB_MESSAGE_INQUIRY_RE.search(body)
+    if m2:
+        text = m2.group(1).strip()
+        text = re.sub(r"[ \t]+", " ", text)
+        text = re.sub(r"\n{3,}", "\n\n", text)
+        return text.strip()
+
+    return None
 
 
 def _extract_voyageur_name(from_header: str, subject: str) -> str:
