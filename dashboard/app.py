@@ -650,11 +650,28 @@ def _extract_login_code(body: str) -> str | None:
 _AIRBNB_THREAD_ID_RE = re.compile(r"airbnb\.[a-z.]+/hosting/thread/(\d+)")
 _AIRBNB_LISTING_ID_RE = re.compile(r"airbnb\.[a-z.]+/rooms/(\d+)")
 # Bloc voyageur dans le body texte : nom en UPPERCASE seul sur sa ligne,
-# suivi de "Responsable de la réservation"
+# suivi de "Responsable de la réservation" sur la ligne suivante (ou après
+# UNE seule ligne blanche, pas plus). Le `\s*` initial est volontaire pour
+# absorber l'indentation Airbnb, mais entre le nom et "Responsable" on
+# limite à 0 ou 1 ligne blanche pour éviter les faux positifs où des
+# rubriques en majuscules (OBJET, BIENVENUE…) matchent à distance.
 _AIRBNB_VOYAGEUR_RE = re.compile(
-    r"^\s*([A-ZÀ-ÿ][A-ZÀ-ÿ '\-]+?)\s*\n\s*Responsable de la r[ée]servation",
+    r"^\s*([A-ZÀ-ÿ][A-ZÀ-ÿ '\-]+?)[ \t]*\n[ \t]*\n?[ \t]*Responsable de la r[ée]servation",
     re.MULTILINE,
 )
+
+# Termes qui peuvent matcher le regex (UPPERCASE) mais ne sont pas des noms
+# de voyageur : rubriques d'emails Airbnb localisés, sections forwardées par
+# Outlook, en-têtes divers.
+_VOYAGEUR_FALSE_POSITIVES = {
+    "OBJET", "SUJET", "DESTINATAIRE", "EXPÉDITEUR", "EXPEDITEUR",
+    "ADRESSE", "DATE", "HEURE",
+    "BIENVENUE", "INFORMATIONS", "DÉTAILS", "DETAILS", "CONDITIONS",
+    "RÈGLEMENT", "REGLEMENT",
+    "VOYAGEURS", "ARRIVÉE", "ARRIVEE", "DÉPART", "DEPART",
+    "MESSAGE", "MESSAGES",
+    "AIRBNB",
+}
 # Message texte : tout ce qui suit "Responsable de la réservation" jusqu'à
 # "Consulter", "Répondre", ou un lien Airbnb
 _AIRBNB_MESSAGE_RE = re.compile(
@@ -685,6 +702,10 @@ def _extract_airbnb_listing_id(body: str) -> str | None:
 def _extract_voyageur_from_body(body: str) -> str | None:
     """Extrait le nom du voyageur depuis le bloc UPPERCASE 'ADRIEN\\nResponsable de la réservation'.
     Plus fiable que le From header (souvent générique 'Airbnb <express@...>').
+
+    Filtre les faux positifs : si le mot capturé est une rubrique connue
+    (OBJET, BIENVENUE, etc.), on retourne None pour laisser le fallback
+    From/Subject prendre la main.
     """
     if not body:
         return None
@@ -692,6 +713,8 @@ def _extract_voyageur_from_body(body: str) -> str | None:
     if not m:
         return None
     raw = m.group(1).strip()
+    if raw.upper() in _VOYAGEUR_FALSE_POSITIVES:
+        return None
     # Le nom est en MAJUSCULES dans l'email. On re-capitalise proprement.
     return " ".join(word.capitalize() for word in raw.split())
 
