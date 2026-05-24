@@ -1,0 +1,26 @@
+# Caddy reverse proxy AutoHôte
+# ----------------------------
+# Termine TLS (Let's Encrypt automatique) et route le trafic vers les
+# services internes du compose. HTTP est redirigé vers HTTPS par défaut.
+
+autohote-igor.duckdns.org {
+    # Email pour les notifications Let's Encrypt (expiration cert, etc.)
+    # Si Caddy ne peut pas obtenir un cert, on aura quand même les alertes.
+    # Remplaçable plus tard si besoin.
+    tls silvereigorlaminsi@gmail.com
+
+    # Reverse proxy vers le service dashboard (réseau Docker interne)
+    reverse_proxy dashboard:8080 {
+        # Headers utiles pour que Flask sache qu'il est derrière un proxy HTTPS
+        header_up X-Real-IP {remote_host}
+        header_up X-Forwarded-For {remote_host}
+        header_up X-Forwarded-Proto https
+    }
+
+    # Logs basiques (visibles via `docker compose logs caddy`)
+    log {
+        output stdout
+        format console
+        level INFO
+    }
+}

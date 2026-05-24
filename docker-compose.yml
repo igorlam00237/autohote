@@ -39,6 +39,20 @@ services:
     volumes:
       - n8n_data:/home/node/.n8n
 
+  caddy:
+    image: caddy:2.8
+    container_name: autohote-caddy
+    restart: always
+    depends_on:
+      - dashboard
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
   dashboard:
     build: ./dashboard
     container_name: autohote-dashboard
@@ -117,3 +131,5 @@ volumes:
   n8n_data:
   postgres_data:
   scraper_data:
+  caddy_data:
+  caddy_config:
