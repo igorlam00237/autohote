@@ -97,10 +97,14 @@ def fetch_pending_messages():
             c.voyageur_langue   AS voyageur_langue,
             l.nom               AS logement_nom,
             (
+                -- Le dernier user message reçu AVANT ce brouillon (pas le dernier
+                -- de la conv : sinon plusieurs drafts d'une même conv affichent
+                -- tous la même question, ce qui était trompeur).
                 SELECT contenu_original
                 FROM messages
                 WHERE conversation_id = m.conversation_id
                   AND role = 'user'
+                  AND id < m.id
                 ORDER BY id DESC
                 LIMIT 1
             ) AS user_message

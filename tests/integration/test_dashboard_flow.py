@@ -27,6 +27,54 @@ class TestPendingMessagesDisplay:
         assert b"check-in" in resp.data
         assert b"Le check-in se fait" in resp.data
 
+    def test_multiple_drafts_in_same_conv_show_correct_user_message(
+        self, client, auth_header, seed_conversation, db_conn,
+    ):
+        """Régression : plusieurs user messages dans une même conv doivent
+        être correctement associés à leur brouillon respectif. Avant le fix
+        de fetch_pending_messages, tous les drafts d'une même conv affichaient
+        le DERNIER user message de la conv au lieu de celui qu'ils répondent.
+        """
+        with db_conn.cursor() as cur:
+            # User msg #1
+            cur.execute(
+                "INSERT INTO messages (conversation_id, role, contenu_original, statut) "
+                "VALUES (%s, 'user', 'Question 1 sur le check-in', 'received');",
+                (seed_conversation,),
+            )
+            # Draft #1 (répond à user msg #1)
+            cur.execute(
+                "INSERT INTO messages (conversation_id, role, contenu_propose, statut) "
+                "VALUES (%s, 'assistant', 'Réponse au check-in', 'pending');",
+                (seed_conversation,),
+            )
+            # User msg #2 plus tard
+            cur.execute(
+                "INSERT INTO messages (conversation_id, role, contenu_original, statut) "
+                "VALUES (%s, 'user', 'Question 2 sur le wifi', 'received');",
+                (seed_conversation,),
+            )
+            # Draft #2 (répond à user msg #2)
+            cur.execute(
+                "INSERT INTO messages (conversation_id, role, contenu_propose, statut) "
+                "VALUES (%s, 'assistant', 'Réponse au wifi', 'pending');",
+                (seed_conversation,),
+            )
+        db_conn.commit()
+
+        resp = client.get("/", headers=auth_header)
+        body = resp.data.decode()
+
+        # Les 2 drafts apparaissent chacun avec LEUR question respective.
+        # Avant le fix, les 2 drafts affichaient "Question 2 sur le wifi"
+        # comme question car le LATERAL JOIN ne filtrait pas par id < draft.id.
+        assert "Question 1 sur le check-in" in body
+        assert "Question 2 sur le wifi" in body
+        # Et chacun est précédé de son user message dans le DOM (au moins
+        # une fois chaque).
+        assert body.count("Question 1 sur le check-in") >= 1
+        assert body.count("Question 2 sur le wifi") >= 1
+
 
 @pytest.mark.integration
 class TestSendAction:
