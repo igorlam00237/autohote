@@ -611,6 +611,41 @@ def _is_airbnb_message_email(headers: dict) -> bool:
     return True
 
 
+def _is_airbnb_login_email(headers: dict, subject: str = "") -> bool:
+    """Vrai si l'email Airbnb contient un code de connexion (login email-code).
+
+    Détecté soit par X-Template commençant par LOGIN_ / AUTH_ / VERIFY_,
+    soit par patterns connus dans le sujet (multilingue).
+    """
+    template = (headers.get("X-Template") or "").strip().upper()
+    if template.startswith(("LOGIN_", "AUTH_", "VERIFY_", "VERIFICATION_")):
+        return True
+    # Fallback subject : on a vu plusieurs formats selon la locale
+    subj = (subject or "").lower()
+    needles = (
+        "code de connexion", "code de vérification", "votre code",
+        "verification code", "login code", "your code", "sign-in code",
+        "connecter à votre compte",
+    )
+    return any(n in subj for n in needles)
+
+
+# Regex pour extraire un code à 4-8 chiffres du body de l'email Airbnb
+_AIRBNB_LOGIN_CODE_RE = re.compile(r"(?<!\d)(\d{4,8})(?!\d)")
+
+
+def _extract_login_code(body: str) -> str | None:
+    """Extrait le code numérique d'un email de login Airbnb.
+
+    Hypothèse : le code est la première séquence de 4-8 chiffres isolée
+    dans le body (pas une partie d'un nombre plus grand).
+    """
+    if not body:
+        return None
+    m = _AIRBNB_LOGIN_CODE_RE.search(body)
+    return m.group(1) if m else None
+
+
 # Regex pré-compilées pour l'extraction depuis le body de l'email Airbnb
 _AIRBNB_THREAD_ID_RE = re.compile(r"airbnb\.[a-z.]+/hosting/thread/(\d+)")
 _AIRBNB_LISTING_ID_RE = re.compile(r"airbnb\.[a-z.]+/rooms/(\d+)")
@@ -815,7 +850,36 @@ def webhook_email():
         )
         return jsonify({"status": "ignored", "reason": "not_from_airbnb"}), 200
 
-    # 3. Type d'email Airbnb : doit être un VRAI message voyageur
+    # 3a. Cas spécial : email de code de connexion Airbnb → stocke en BDD
+    if _is_airbnb_login_email(headers, subject):
+        code = _extract_login_code(body_for_extract)
+        if not code:
+            app.logger.warning("Email login Airbnb détecté mais code non extractible.")
+            return jsonify({
+                "status": "ignored",
+                "reason": "login_email_without_code",
+                "template": headers.get("X-Template"),
+            }), 200
+        with db_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO airbnb_auth_codes (code, raw_subject, raw_template)
+                    VALUES (%s, %s, %s)
+                    RETURNING id;
+                    """,
+                    (code, subject[:200], headers.get("X-Template")),
+                )
+                code_id = cur.fetchone()[0]
+                conn.commit()
+        app.logger.info("Code login Airbnb capté (id=%s)", code_id)
+        return jsonify({
+            "status": "ok",
+            "type": "airbnb_login_code",
+            "code_id": code_id,
+        }), 200
+
+    # 3b. Type d'email Airbnb : doit être un VRAI message voyageur
     if not _is_airbnb_message_email(headers):
         app.logger.info(
             "Email Airbnb non-message ignoré : X-Category=%r X-Template=%r subject=%r",

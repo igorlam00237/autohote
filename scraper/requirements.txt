@@ -1,0 +1,6 @@
+# Playwright est déjà préinstallé dans l'image officielle.
+# On épingle ici uniquement nos deps additionnelles.
+
+psycopg2-binary==2.9.9
+requests==2.32.3
+playwright-stealth==1.0.6

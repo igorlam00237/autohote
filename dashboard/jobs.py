@@ -18,13 +18,35 @@ Payload : libre (JSONB). Convention par job_type :
 from __future__ import annotations
 
 import json
+import os
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+import psycopg2
 import psycopg2.extras
 
-# Référence à la fonction db_conn() de app.py — on l'importe au moment de
-# l'appel pour éviter les cycles d'import au chargement du module.
+
+# --- Connexion BDD ---
+# Module auto-suffisant : on lit les variables d'environnement Postgres
+# directement, sans dépendre de `app.py`. Cela permet à ce module d'être
+# importé par n'importe quel composant (scraper, worker, cron…) sans
+# pulling Flask au chargement.
+
+_DB_CONFIG = None
+
+
+def _get_db_config() -> dict:
+    """Lazy load + cache la configuration BDD depuis l'environnement."""
+    global _DB_CONFIG
+    if _DB_CONFIG is None:
+        _DB_CONFIG = {
+            "host": os.environ.get("POSTGRES_HOST", "postgres"),
+            "port": int(os.environ.get("POSTGRES_PORT", "5432")),
+            "user": os.environ["POSTGRES_USER"],
+            "password": os.environ["POSTGRES_PASSWORD"],
+            "dbname": os.environ["POSTGRES_DB"],
+        }
+    return _DB_CONFIG
 
 
 # --- Constantes ---
@@ -56,9 +78,8 @@ RETRY_BACKOFF_SECONDS = (60, 300, 900)
 # --- Helpers internes ---
 
 def _db_conn():
-    """Délégation à `app.db_conn()` (import paresseux pour éviter les cycles)."""
-    from app import db_conn  # noqa: WPS433
-    return db_conn()
+    """Connexion psycopg2 fraîche basée sur les env vars Postgres."""
+    return psycopg2.connect(**_get_db_config())
 
 
 def _row_to_dict(cursor, row) -> dict:

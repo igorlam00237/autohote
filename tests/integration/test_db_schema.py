@@ -15,6 +15,7 @@ class TestSchemaTables:
         "conversations",
         "messages",
         "scraper_jobs",
+        "airbnb_auth_codes",
     }
 
     def test_all_required_tables_exist(self, db_conn):
@@ -53,6 +54,10 @@ class TestSchemaColumns:
             "attempts", "max_attempts", "scheduled_at",
             "started_at", "completed_at", "last_error",
             "conversation_id", "created_at",
+        },
+        "airbnb_auth_codes": {
+            "id", "code", "received_at", "consumed_at",
+            "raw_subject", "raw_template",
         },
     }
 

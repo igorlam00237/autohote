@@ -116,6 +116,24 @@ CREATE INDEX IF NOT EXISTS idx_scraper_jobs_conversation
     WHERE conversation_id IS NOT NULL;
 
 -- -----------------------------------------------------
+-- Table airbnb_auth_codes
+-- Codes de connexion email Airbnb captés par Mailgun et consommés par le scraper.
+-- TTL court : codes Airbnb expirent en ~10 min, nettoyage manuel pour debug.
+-- -----------------------------------------------------
+CREATE TABLE IF NOT EXISTS airbnb_auth_codes (
+    id           BIGSERIAL PRIMARY KEY,
+    code         TEXT NOT NULL,
+    received_at  TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    consumed_at  TIMESTAMPTZ,
+    raw_subject  TEXT,
+    raw_template TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_airbnb_auth_codes_unconsumed
+    ON airbnb_auth_codes (received_at DESC)
+    WHERE consumed_at IS NULL;
+
+-- -----------------------------------------------------
 -- Index pour les requêtes fréquentes
 -- -----------------------------------------------------
 CREATE INDEX IF NOT EXISTS idx_logements_source       ON logements(source_id);

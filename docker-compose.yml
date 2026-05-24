@@ -61,6 +61,31 @@ services:
       - MAILGUN_SIGNING_KEY=${MAILGUN_SIGNING_KEY}
       - TZ=Europe/Paris
 
+  scraper:
+    build: ./scraper
+    container_name: autohote-scraper
+    # Profile "worker" : ne démarre pas avec `up -d`. Activé en Phase 3d quand
+    # le worker.py existera. En attendant, utilisable via `docker compose run`
+    # pour des actions ponctuelles (login, read, write).
+    profiles: ["worker"]
+    restart: always
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
+      - AIRBNB_LOGIN_EMAIL=${AIRBNB_LOGIN_EMAIL}
+      - PLAYWRIGHT_HEADLESS=true
+      - SCRAPER_STATE_DIR=/app/state
+      - TZ=Europe/Paris
+    volumes:
+      - scraper_data:/app/state
+      - ./dashboard:/app/dashboard:ro
+
   tests:
     build: ./tests
     container_name: autohote-tests
@@ -79,13 +104,16 @@ services:
       - WEBHOOK_SECRET=test-webhook-secret
       - CLAUDE_API_KEY=sk-ant-fake
       - MAILGUN_SIGNING_KEY=test-mailgun-signing-key
+      - AIRBNB_LOGIN_EMAIL=test-host@example.com
       - TZ=Europe/Paris
     volumes:
       - ./tests:/app/tests:ro
       - ./dashboard:/app/dashboard:ro
       - ./scripts:/app/scripts:ro
+      - ./scraper:/app/scraper:ro
       - ./docker-compose.yml:/app/docker-compose.yml:ro
 
 volumes:
   n8n_data:
   postgres_data:
+  scraper_data:
