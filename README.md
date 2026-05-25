@@ -252,6 +252,6 @@ La suite tourne dans un conteneur Docker isolé contre une base `autohote_test` 
 
 ---
 
-## Licence
+## Statut
 
-Projet privé.
+Code source public à titre de transparence — aucune licence d'utilisation, modification ou redistribution n'est accordée à ce stade. Tous droits réservés.
